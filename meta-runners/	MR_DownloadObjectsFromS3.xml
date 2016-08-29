@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<meta-runner name="Download Objects from S3">
+  <description>Downloads objects from AWS S3</description>
+  <settings>
+    <parameters>
+      <param name="system.assume.role" value="" spec="text display='normal' description='ARN of AWS IAM Role you want to assume before trying to download objects' label='Role to Assume:' validationMode='any'" />
+      <param name="system.role.session.name" value="" spec="text description='An identifier for the assumed role session' label='Role Session Name' validationMode='not_empty' display='normal'" />
+      <param name="system.bucket" value="" spec="text description='Existing S3 bucket name' label='S3 Bucket:' validationMode='not_empty' display='normal'" />
+      <param name="system.object.keys" value="" spec="text display='normal' description='Comma-separated keys to objects in S3 bucket' label='S3 Object Keys:' validationMode='not_empty'" />
+      <param name="system.output.paths" value="" spec="text description='Comma-separated paths to download S3 objects to. Leave empty to use working directory.' label='Output Paths:' validationMode='any' display='normal'" />
+    </parameters>
+    <build-runners>
+      <runner name="" type="jetbrains_powershell">
+        <parameters>
+          <param name="jetbrains_powershell_bitness" value="x86" />
+          <param name="jetbrains_powershell_execution" value="PS1" />
+          <param name="jetbrains_powershell_script_code"><![CDATA[# Build Server Properties
+$assumeRole = '%system.assume.role%'
+$roleSessionName = '%system.role.session.name%'
+$bucket = '%system.bucket%'
+$keys = '%system.object.keys%'
+$outPaths = '%system.output.paths%'
+
+# Script Vars
+$keys = $keys.Split(",")
+$outPaths = $outPaths.Split(",")
+$outputFilename = 'output.json'
+
+# Get temp keys and add to $credentials
+aws sts assume-role --role-arn $assumeRole --role-session-name $roleSessionName > $outputFilename
+$credentials = (Get-Content $outputFilename) -Join "`n" | ConvertFrom-Json
+
+# Delete output file
+Remove-Item $outputFilename
+
+# Set environment variables so that can use native CLI commands as that role
+$env:AWS_ACCESS_KEY_ID = $credentials.Credentials.AccessKeyId
+$env:AWS_SECRET_ACCESS_KEY = $credentials.Credentials.SecretAccessKey
+$env:AWS_SESSION_TOKEN = $credentials.Credentials.SessionToken
+
+# Get files
+$i = 0
+foreach ($k in $keys) {
+    # Figure out file output path
+    # If outPaths array is greater than 1 then set the output path to the corresponding array position of the key
+    if($outPaths.Count -gt 1) {
+        $outPath = $outPaths[$i] + "/"
+
+    # Else set the output path to the same value for all keys
+    } else {
+        $outPath = $outPaths[0]
+
+        # If outPaths is empty then don't add trailing forward slash
+        if($outPaths[0] -ne "") {
+            $outPath = $outPath + "/"
+        }
+    }
+
+    # Get just file name from key
+    $key = split-path $k -leaf
+
+    # Download file
+    aws s3 cp s3://$bucket/$k $outPath$key
+
+    $i++
+}]]></param>
+          <param name="jetbrains_powershell_script_mode" value="CODE" />
+          <param name="teamcity.step.mode" value="default" />
+        </parameters>
+      </runner>
+    </build-runners>
+    <requirements />
+  </settings>
+</meta-runner>
+
